@@ -3,12 +3,19 @@ YouTube Video Summarizer
 Usage: python main.py <youtube_url> [--style brief|detailed|bullets] [--whisper] [--save]
 """
 
+import logging
 import os
 import sys
 import click
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
 from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
@@ -37,10 +44,10 @@ console = Console()
     help="Force Whisper transcription (skip YouTube captions)",
 )
 @click.option(
-    "--save",
+    "--save-transcript",
     is_flag=True,
     default=False,
-    help="Save transcript and summary to files",
+    help="Also save the transcript to a file",
 )
 @click.option(
     "--transcript-only",
@@ -48,7 +55,7 @@ console = Console()
     default=False,
     help="Only extract and print the transcript, skip summarization",
 )
-def main(url: str, style: str, whisper: bool, save: bool, transcript_only: bool):
+def main(url: str, style: str, whisper: bool, save_transcript: bool, transcript_only: bool):
     """Transcribe and summarize a YouTube video."""
 
     if not os.environ.get("ANTHROPIC_API_KEY") and not transcript_only:
@@ -77,17 +84,23 @@ def main(url: str, style: str, whisper: bool, save: bool, transcript_only: bool)
     console.print(f"[green]Transcript extracted[/green] via {method_label}")
     console.print(f"Length: {len(transcript):,} characters / ~{len(transcript.split()):,} words\n")
 
+    # Always show the full transcript
+    console.print(Panel(
+        transcript,
+        title="[bold]Transcript[/bold]",
+        border_style="blue",
+        padding=(1, 2),
+    ))
+
     if transcript_only:
-        console.print(Panel(transcript[:3000] + ("..." if len(transcript) > 3000 else ""),
-                            title="Transcript (preview)", border_style="blue"))
-        if save:
-            _save_files(url, transcript, None)
+        if save_transcript:
+            _save_transcript(url, transcript)
         return
 
     # Step 2: Summarize
     with console.status(f"[bold yellow]Summarizing ({style} style)...[/bold yellow]"):
         try:
-            summary = summarize_transcript(transcript, style=style)
+            summary, usage = summarize_transcript(transcript, style=style)
         except Exception as e:
             console.print(f"[red]Failed to summarize:[/red] {e}")
             sys.exit(1)
@@ -100,28 +113,41 @@ def main(url: str, style: str, whisper: bool, save: bool, transcript_only: bool)
         padding=(1, 2),
     ))
 
-    if save:
-        _save_files(url, transcript, summary)
+    summary_path = _save_summary(url, summary, usage)
+    console.print(f"[dim]Summary saved to {summary_path}[/dim]")
+
+    if save_transcript:
+        _save_transcript(url, transcript)
 
 
-def _save_files(url: str, transcript: str, summary: str | None):
-    """Save transcript and summary to text files."""
+def _save_summary(url: str, summary: str, usage: dict) -> str:
+    """Save summary to output/<video_id>_summary.txt. Returns the file path."""
     from transcriber import extract_video_id
     video_id = extract_video_id(url)
     os.makedirs("output", exist_ok=True)
+    path = f"output/{video_id}_summary.txt"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(url + "\n")
+        f.write(
+            f"Tokens: input={usage['input_tokens']}, "
+            f"output={usage['output_tokens']}, "
+            f"total={usage['total_tokens']}\n\n"
+        )
+        f.write(summary)
+    return path
 
-    transcript_path = f"output/{video_id}_transcript.txt"
-    with open(transcript_path, "w", encoding="utf-8") as f:
-        f.write(f"Source: {url}\n\n")
+
+def _save_transcript(url: str, transcript: str) -> str:
+    """Save transcript to output/<video_id>_transcript.txt. Returns the file path."""
+    from transcriber import extract_video_id
+    video_id = extract_video_id(url)
+    os.makedirs("output", exist_ok=True)
+    path = f"output/{video_id}_transcript.txt"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(url + "\n\n")
         f.write(transcript)
-    console.print(f"[dim]Transcript saved to {transcript_path}[/dim]")
-
-    if summary:
-        summary_path = f"output/{video_id}_summary.txt"
-        with open(summary_path, "w", encoding="utf-8") as f:
-            f.write(f"Source: {url}\n\n")
-            f.write(summary)
-        console.print(f"[dim]Summary saved to {summary_path}[/dim]")
+    console.print(f"[dim]Transcript saved to {path}[/dim]")
+    return path
 
 
 if __name__ == "__main__":

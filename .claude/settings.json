@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "input=$(cat); cmd=$(echo \"$input\" | jq -r '.tool_input.command // \"\"'); if echo \"$cmd\" | grep -qE '^git (commit|push)'; then if git diff --cached --name-only 2>/dev/null | grep -q '^\\.env$'; then echo '{\"continue\": false, \"stopReason\": \"Blocked: .env is staged for commit. Remove it with: git reset HEAD .env\"}'; exit 0; fi; fi; echo '{\"continue\": true}'",
+            "statusMessage": "Checking commit safety..."
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -2,10 +2,14 @@
 Summarizes transcripts using Claude API.
 """
 
+import logging
+
 import anthropic
 
+logger = logging.getLogger(__name__)
 
-def summarize_transcript(transcript: str, style: str = "detailed") -> str:
+
+def summarize_transcript(transcript: str, style: str = "detailed") -> tuple[str, dict]:
     """
     Summarize a transcript using Claude.
 
@@ -35,8 +39,14 @@ def summarize_transcript(transcript: str, style: str = "detailed") -> str:
     # Handle very long transcripts by chunking
     max_chars = 180_000  # ~45k tokens, safe limit for claude-sonnet
     if len(transcript) > max_chars:
+        logger.warning(
+            "Transcript too long (%d chars); truncating to %d chars", len(transcript), max_chars
+        )
         transcript = transcript[:max_chars] + "\n\n[Transcript truncated due to length]"
 
+    logger.info(
+        "Sending %d chars to Claude (model=claude-sonnet-4-6, style=%s)", len(transcript), style
+    )
     message = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=2048,
@@ -52,4 +62,17 @@ def summarize_transcript(transcript: str, style: str = "detailed") -> str:
         ],
     )
 
-    return message.content[0].text
+    summary = message.content[0].text
+    usage = {
+        "input_tokens": message.usage.input_tokens,
+        "output_tokens": message.usage.output_tokens,
+        "total_tokens": message.usage.input_tokens + message.usage.output_tokens,
+    }
+    logger.info(
+        "Summary received: %d chars (input_tokens=%d, output_tokens=%d, total=%d)",
+        len(summary),
+        usage["input_tokens"],
+        usage["output_tokens"],
+        usage["total_tokens"],
+    )
+    return summary, usage
