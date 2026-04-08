@@ -5,10 +5,15 @@ Strategy 2: Download audio + Whisper transcription (fallback)
 """
 
 import logging
-import os
 import tempfile
-from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound, TranscriptsDisabled
-from urllib.parse import urlparse, parse_qs
+from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+from youtube_transcript_api import (
+    NoTranscriptFound,
+    TranscriptsDisabled,
+    YouTubeTranscriptApi,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,34 +38,45 @@ def get_transcript_from_captions(video_id: str) -> tuple[str, str]:
     """
     logger.info("Fetching available transcripts for video: %s", video_id)
     try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        transcript_list = YouTubeTranscriptApi().list(video_id)
 
         # Prefer manually created English transcripts first
         transcript = None
         try:
-            transcript = transcript_list.find_manually_created_transcript(["en", "en-US", "en-GB"])
+            transcript = transcript_list.find_manually_created_transcript(
+                ["en", "en-US", "en-GB"]
+            )
             logger.info("Found manually created English transcript")
-        except Exception:
+        except NoTranscriptFound:
             pass
 
         # Fall back to auto-generated English
         if not transcript:
             try:
-                transcript = transcript_list.find_generated_transcript(["en", "en-US", "en-GB"])
+                transcript = transcript_list.find_generated_transcript(
+                    ["en", "en-US", "en-GB"]
+                )
                 logger.info("Found auto-generated English transcript")
-            except Exception:
+            except NoTranscriptFound:
                 pass
 
         # Fall back to any transcript and translate to English
         if not transcript:
             transcript = next(iter(transcript_list))
-            logger.info("No English transcript found; translating %s to English", transcript.language_code)
+            logger.info(
+                "No English transcript found; translating %s to English",
+                transcript.language_code,
+            )
             transcript = transcript.translate("en")
 
         logger.info("Fetching transcript data...")
         data = transcript.fetch()
-        full_text = " ".join(entry["text"] for entry in data)
-        logger.info("Transcript fetched: %d characters, ~%d words", len(full_text), len(full_text.split()))
+        full_text = " ".join(entry.text for entry in data)
+        logger.info(
+            "Transcript fetched: %d characters, ~%d words",
+            len(full_text),
+            len(full_text.split()),
+        )
         return full_text, "youtube_captions"
 
     except (NoTranscriptFound, TranscriptsDisabled) as e:
@@ -70,6 +86,7 @@ def get_transcript_from_captions(video_id: str) -> tuple[str, str]:
 def _check_ffmpeg() -> None:
     """Raise a clear error if ffmpeg is not installed."""
     import shutil
+
     if shutil.which("ffmpeg") is None:
         raise RuntimeError(
             "ffmpeg is required for audio transcription but was not found.\n"
@@ -91,7 +108,8 @@ def get_transcript_via_whisper(url: str) -> tuple[str, str]:
 
     logger.info("Downloading audio with yt-dlp...")
     with tempfile.TemporaryDirectory() as tmpdir:
-        audio_path = os.path.join(tmpdir, "audio.%(ext)s")
+        tmpdir_path = Path(tmpdir)
+        audio_path = str(tmpdir_path / "audio.%(ext)s")
 
         # No postprocessors — skip ffmpeg conversion, download raw audio
         ydl_opts = {
@@ -105,19 +123,22 @@ def get_transcript_via_whisper(url: str) -> tuple[str, str]:
             ydl.download([url])
 
         # Find the downloaded audio file (webm, m4a, opus, etc.)
-        files = os.listdir(tmpdir)
+        files = list(tmpdir_path.iterdir())
         if not files:
             raise RuntimeError("No audio file downloaded")
-        audio_file = os.path.join(tmpdir, files[0])
-        logger.info("Audio downloaded: %s", os.path.basename(audio_file))
+        audio_file = files[0]
+        logger.info("Audio downloaded: %s", audio_file.name)
 
         logger.info("Loading Whisper 'base' model...")
         model = whisper.load_model("base")
         logger.info("Transcribing audio with Whisper...")
-        result = model.transcribe(audio_file)
+        result = model.transcribe(str(audio_file))
         transcript = result["text"]
-        logger.info("Whisper transcription complete: %d characters, ~%d words",
-                    len(transcript), len(transcript.split()))
+        logger.info(
+            "Whisper transcription complete: %d characters, ~%d words",
+            len(transcript),
+            len(transcript.split()),
+        )
         return transcript, "whisper"
 
 
@@ -133,7 +154,7 @@ def get_transcript(url: str, force_whisper: bool = False) -> tuple[str, str]:
         logger.info("Trying YouTube captions first...")
         try:
             return get_transcript_from_captions(video_id)
-        except Exception as e:
+        except RuntimeError as e:
             logger.warning("Captions unavailable (%s); falling back to Whisper", e)
 
     logger.info("Using Whisper for transcription")

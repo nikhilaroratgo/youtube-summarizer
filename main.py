@@ -6,8 +6,16 @@ Usage: python main.py <youtube_url> [--style brief|detailed|bullets] [--whisper]
 import logging
 import os
 import sys
+from pathlib import Path
+
 import click
 from dotenv import load_dotenv
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.panel import Panel
+
+from summarizer import AVAILABLE_MODELS, DEFAULT_MODEL, summarize_transcript
+from transcriber import extract_video_id, get_transcript
 
 load_dotenv()
 
@@ -16,14 +24,6 @@ logging.basicConfig(
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     datefmt="%H:%M:%S",
 )
-from rich.console import Console
-from rich.panel import Panel
-from rich.markdown import Markdown
-from rich.spinner import Spinner
-from rich import print as rprint
-
-from transcriber import get_transcript
-from summarizer import summarize_transcript
 
 console = Console()
 
@@ -55,7 +55,21 @@ console = Console()
     default=False,
     help="Only extract and print the transcript, skip summarization",
 )
-def main(url: str, style: str, whisper: bool, save_transcript: bool, transcript_only: bool):
+@click.option(
+    "--model",
+    type=click.Choice(AVAILABLE_MODELS),
+    default=DEFAULT_MODEL,
+    show_default=True,
+    help="Claude model to use for summarization",
+)
+def main(
+    url: str,
+    style: str,
+    whisper: bool,
+    save_transcript: bool,
+    transcript_only: bool,
+    model: str,
+):
     """Transcribe and summarize a YouTube video."""
 
     if not os.environ.get("ANTHROPIC_API_KEY") and not transcript_only:
@@ -82,15 +96,19 @@ def main(url: str, style: str, whisper: bool, save_transcript: bool, transcript_
     }.get(method, method)
 
     console.print(f"[green]Transcript extracted[/green] via {method_label}")
-    console.print(f"Length: {len(transcript):,} characters / ~{len(transcript.split()):,} words\n")
+    console.print(
+        f"Length: {len(transcript):,} characters / ~{len(transcript.split()):,} words\n"
+    )
 
     # Always show the full transcript
-    console.print(Panel(
-        transcript,
-        title="[bold]Transcript[/bold]",
-        border_style="blue",
-        padding=(1, 2),
-    ))
+    console.print(
+        Panel(
+            transcript,
+            title="[bold]Transcript[/bold]",
+            border_style="blue",
+            padding=(1, 2),
+        )
+    )
 
     if transcript_only:
         if save_transcript:
@@ -100,52 +118,56 @@ def main(url: str, style: str, whisper: bool, save_transcript: bool, transcript_
     # Step 2: Summarize
     with console.status(f"[bold yellow]Summarizing ({style} style)...[/bold yellow]"):
         try:
-            summary, usage = summarize_transcript(transcript, style=style)
+            summary, usage, hashtags = summarize_transcript(transcript, style=style, model=model)
         except Exception as e:
             console.print(f"[red]Failed to summarize:[/red] {e}")
             sys.exit(1)
 
     # Display results
-    console.print(Panel(
-        Markdown(summary),
-        title=f"[bold]Summary ({style})[/bold]",
-        border_style="green",
-        padding=(1, 2),
-    ))
+    console.print(
+        Panel(
+            Markdown(summary),
+            title=f"[bold]Summary ({style})[/bold]",
+            border_style="green",
+            padding=(1, 2),
+        )
+    )
 
-    summary_path = _save_summary(url, summary, usage)
+    summary_path = _save_summary(url, summary, usage, model, hashtags)
     console.print(f"[dim]Summary saved to {summary_path}[/dim]")
 
     if save_transcript:
         _save_transcript(url, transcript)
 
 
-def _save_summary(url: str, summary: str, usage: dict) -> str:
+def _save_summary(
+    url: str, summary: str, usage: dict, model: str, hashtags: list[str]
+) -> Path:
     """Save summary to output/<video_id>_summary.txt. Returns the file path."""
-    from transcriber import extract_video_id
     video_id = extract_video_id(url)
-    os.makedirs("output", exist_ok=True)
-    path = f"output/{video_id}_summary.txt"
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(url + "\n")
-        f.write(
-            f"Tokens: input={usage['input_tokens']}, "
-            f"output={usage['output_tokens']}, "
-            f"total={usage['total_tokens']}\n\n"
-        )
-        f.write(summary)
+    output_dir = Path("output")
+    output_dir.mkdir(exist_ok=True)
+    path = output_dir / f"{video_id}_summary.txt"
+    hashtag_str = " ".join(hashtags)
+    path.write_text(
+        f"{url}\n"
+        f"Tokens: input={usage['input_tokens']}, "
+        f"output={usage['output_tokens']}, "
+        f"total={usage['total_tokens']} | Model: {model}\n"
+        f"Hashtags: {hashtag_str}\n\n"
+        f"{summary}",
+        encoding="utf-8",
+    )
     return path
 
 
-def _save_transcript(url: str, transcript: str) -> str:
+def _save_transcript(url: str, transcript: str) -> Path:
     """Save transcript to output/<video_id>_transcript.txt. Returns the file path."""
-    from transcriber import extract_video_id
     video_id = extract_video_id(url)
-    os.makedirs("output", exist_ok=True)
-    path = f"output/{video_id}_transcript.txt"
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(url + "\n\n")
-        f.write(transcript)
+    output_dir = Path("output")
+    output_dir.mkdir(exist_ok=True)
+    path = output_dir / f"{video_id}_transcript.txt"
+    path.write_text(f"{url}\n\n{transcript}", encoding="utf-8")
     console.print(f"[dim]Transcript saved to {path}[/dim]")
     return path
 
