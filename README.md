@@ -20,6 +20,18 @@ ANTHROPIC_API_KEY=your_key_here
 
 ## Usage
 
+You can use the summarizer two ways:
+
+**Option 1 — Web UI (recommended):** Start the local server and paste any YouTube URL directly in the browser:
+
+```bash
+node server.js
+```
+
+Then open [http://localhost:3000](http://localhost:3000), paste a YouTube URL into the input field, and hit summarize.
+
+**Option 2 — CLI:**
+
 ```bash
 uv run main.py "https://youtube.com/watch?v=VIDEO_ID"
 ```
