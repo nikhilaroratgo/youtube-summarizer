@@ -4,26 +4,19 @@ Paste a YouTube link, get a summary. Uses YouTube's built-in captions when avail
 
 ## Setup
 
-Install [uv](https://docs.astral.sh/uv/) if you don't have it:
+Run the setup script — it installs `uv` (if needed), creates the virtual environment, and installs all dependencies:
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
+bash setup.sh
 ```
 
-Install dependencies and set your API key:
-
-```bash
-cd youtube_summarizer
-uv sync
-```
-
-Create a `.env` file in the project root:
+Then create a `.env` file in the project root with your API key:
 
 ```
 ANTHROPIC_API_KEY=your_key_here
 ```
 
-> **Note:** ffmpeg is required only for the Whisper fallback. Install with `brew install ffmpeg` (macOS) or `sudo apt install ffmpeg` (Ubuntu).
+> **Note:** ffmpeg is required only for the Whisper fallback. The setup script will warn you if it's missing. Install with `brew install ffmpeg` (macOS) or `sudo apt install ffmpeg` (Ubuntu).
 
 ## Usage
 
@@ -109,6 +102,7 @@ youtube_summarizer/
 ├── transcriber.py     # Transcript extraction logic
 ├── summarizer.py      # Claude summarization
 ├── server.js          # Local web UI server
+├── setup.sh           # One-time environment setup script
 ├── pyproject.toml     # Python dependencies (managed by uv)
 ├── CLAUDE.md          # AI assistant project rules
 └── output/            # Saved summaries (auto-created)
